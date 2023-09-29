@@ -19,6 +19,8 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -60,15 +62,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun observer() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
+        lifecycleScope.launchWhenStarted {
                 viewModel.permissionFlow.collect {
                     Log.d(TAG, "observer: permission flow: $it")
 
                     if (it) {
                         prepareCamera()
                     }
-                }
             }
         }
     }
@@ -82,24 +82,45 @@ class MainActivity : ComponentActivity() {
             providers.buildPreview,
             providers.buildTakePicture
         )
+        val list = mutableListOf<String>()
 
         // use multiple coroutines to have more scans ????!!!
-        CoroutineScope(Dispatchers.Default).launch {
-            repeat(Int.MAX_VALUE) {
-                startCapture()
+        withContext(Dispatchers.Default) {
+            repeat(3) {
+                ensureActive()
+                startCapture {
+                    Log.i(TAG, "prepareCamera: value: $it")
+                    list.add(it)
+                }
             }
+
+            Log.i(TAG, "prepareCamera: list size: ${list.size}")
+            if (list.isNotEmpty()){
+                Log.i(TAG, "prepareCamera: list: ${list.last()}")
+                Extraction(list.last()).also {
+                    Log.i(TAG, "prepareCamera: card detail: $it")
+                }
+            }
+
         }
+
+
     }
 
     @OptIn(ExperimentalGetImage::class)
-    private suspend fun startCapture() {
+    private suspend fun startCapture(string: (String) -> Unit) {
         Log.i(TAG, "startCapture: ")
-        val imageProxy = providers.buildTakePicture.takePicture(ContextCompat.getMainExecutor(this))
-        extractDataUseCase.process(imageProxy, onSuccess = {
-            Log.i(TAG, "startCapture: success: $it")
-        }, onFailure = {
-            Log.e(TAG, "startCapture: failure: ", it)
-        })
+       try {
+           val imageProxy = providers.buildTakePicture.takePicture(ContextCompat.getMainExecutor(this))
+           extractDataUseCase.process(imageProxy, onSuccess = {
+               Log.i(TAG, "startCapture: success: $it")
+               string.invoke(it)
+           }, onFailure = {
+               Log.e(TAG, "startCapture: failure: ", it)
+           })
+       }catch (e:Exception){
+           e.printStackTrace()
+       }
     }
 
     private fun checkCameraPermission(/*execute: () -> Unit*/) {
